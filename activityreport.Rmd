@@ -1,0 +1,215 @@
+---
+title: "Machine Learning - Using Non-Linear  Models to Predict Activities"
+author: "Subroto Datta"
+date: "Friday, May 22, 2015"
+output: html_document
+---
+
+### Introduction 
+This report covers the development of a machine learning model to predict the quality of bar bell lifting activities using data collected from various sensors. The data for this project was obtained from : http://groupware.les.inf.puc-rio.br/har. The report covers the steps in building the model and a discussion of the results. 
+
+####1)  Creating  a tidy dataset#### 
+
+The raw data im pml-training.csv had several columns with NA and several columns with blank values. As the columns which had blank values were sparse, missing data could not be imputed. Therefore columns which had NA and blank values were dropped. The dataset after this step is called pData1.
+
+```{r}
+library(e1071)
+library(caret)
+
+## setwd("C:/Users/Subroto/Coursera/PracticalMachineLearning_May_2015/Project")
+
+pData <- read.csv(file=".\\data\\pml-training.csv",header=TRUE, stringsAsFactors =FALSE)
+nam <- names(pData)
+
+keepnam <- character()
+
+## Extract a vector of column names which have no empty values or NA
+for (j in 1:dim(pData)[2]) {
+  nempty <- sum(pData[,j] == "")
+  nNA <- sum(is.na(pData[,j])) 
+  if (!(nempty != 0 || nNA != 0)) {
+    keepnam <- c(keepnam, nam[j])
+  }
+}
+
+## Extract the data from pData into a new dataset
+pData1 <- pData[, keepnam]
+
+## Convert the classe outcome into a factor as this was read in as a string
+pData2 <- pData1
+pData2$classe <- as.factor(pData2$classe)
+
+## Drop variables not relevant to the problem
+pData3 <- subset(pData2, select= -c(X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, new_window, num_window)) 
+
+```
+
+#### 2) Generating a training and validation set####
+Two data sets, one for training and one for cross validation were generated. The cross validation dataset was used to decide the final model that would be used. In this project the test data set with 20 samples was provided separately by the instructor. The instructions to create the training and validation data set are provided below. 
+
+```{r}
+## Set the seed
+set.seed(1234)
+## Create training set and validation set
+inTrain <- createDataPartition(y=pData3$classe, p = 0.75, list=FALSE)
+training <- pData3[inTrain,]
+validation <- pData3[-inTrain, ]
+```
+
+####3) Model generation####
+
+Three models were investigated. 
+
+* A simple tree based model 
+
+* A complicated model using bagging with trees - random forest algorithm 
+
+* A complicated model using gradient boosting with trees - gradient boosting algorithm 
+
+
+As the model computation is computationally intensive, the models were created and saved using the saveRDS command. For the purpose of this report, the saved models were read back using readRDS and then used for printing the model results and prediction.
+
+As we are generating a classifier the **"Accuracy"** metric will be used to judge the algorithm performance.
+
+
+
+
+#####**3 a) Model generation - Tree based model with rpart**
+
+```{r}
+## Fit a simple tree based model
+## set.seed(1234)
+## modelrp <- train(classe ~ ., data=training, method="rpart")
+## saveRDS(modelrp, "rpModel_1234.rds")
+modelrp <- readRDS("rpModel_1234.rds")
+
+## Predict on the training set (resubstitution)
+result <- confusionMatrix(predict(modelrp, newdata=training), training$classe)
+result$table
+paste("RP: Resubstitution Accuracy", round(result$overall[1],3), sep = " = ")
+
+## Predict on the validation set
+result <- confusionMatrix(predict(modelrp, newdata=validation), validation$classe)
+result$table
+paste("RP: Out of sample (generalization) Accuracy", round(result$overall[1], 3), sep = " = ")
+```
+
+
+
+#####**3 b) Model generation - Random forest Tree based model with rf**
+```{r}
+## Fit a tree based model using random forests
+## set.seed(1234)
+## modelrf <- train(classe ~ ., data=training, method="rf")
+## saveRDS(modelrf, "rfModel_1234.rds")
+modelrf <- readRDS("rfModel_1234.rds")
+
+## Predict on the training set (resubstitution)
+result <- confusionMatrix(predict(modelrf, newdata=training), training$classe)
+result$table
+paste("RF: Resubstitution Accuracy", round(result$overall[1],3), sep = " = ")
+
+## Predict on the validation set
+result <- confusionMatrix(predict(modelrf, newdata=validation), validation$classe)
+result$table
+paste("RF: Out of sample (generalization) Accuracy", round(result$overall[1], 3), sep = " = ")
+```
+
+
+
+#####**3 c) Model generation - Gradient boosting Tree based model with gbm**
+```{r}
+## Fit a tree based model using random forests
+## set.seed(1234)
+## modelgbm <- train(classe ~ ., data=training, method="gbm")
+## saveRDS(modelgbm, "gbmModel_1234.rds")
+modelgbm <- readRDS("gbmModel_1234.rds")
+
+## Predict on the training set (resubstitution)
+result <- confusionMatrix(predict(modelgbm, newdata=training), training$classe)
+result$table
+paste("GBM: Resubstitution Accuracy ", round(result$overall[1],3), sep = " = ")
+
+## Predict on the validation set
+result <- confusionMatrix(predict(modelgbm, newdata=validation), validation$classe)
+result$table
+paste("GBM: Out of sample (generalization) Accuracy", round(result$overall[1], 3), sep = " = ")
+```
+
+####4) Cross validation
+
+In this project cross validation was used in two ways:
+
+a) Cross validation **within** a single model was done using the capabilities built into the train() function in caret.The train() function in caret generates bootstrapped samples from the training data set to tune the parameters for the given algorithm. During this resampling and training process the train() function obtains its own estimates of out of sample errors using the training set. These are plotted below
+
+**Out of sample Accuracy for the three models as predicted by train()**
+```{r, echo=TRUE, figure.width=4, figure.height=4}
+resamps <- resamples(list(RF = modelrf, RP = modelrp,  GBM = modelgbm))
+trellis.par.set(caretTheme())
+dotplot(resamps, metric = "Accuracy")
+```
+
+b) Cross validation **across** the three models was done using the validation data to select a final model using the Accuracy value as the metric. As a cross check the predict() function on the training data set provides an upper bound on of the out of sample Accuracy for each of the three models. This was confirmed to be true.
+
+
+####5) Predicted out of sample Accuracy 
+Based on the results in Section 3 which contains the model results and predictions against the validation set, the Predicted out of sample Accuracy for the three models are:
+
+* rpart model (simple regresion tree) : 0.533 
+
+* rf model (random forest with trees) : 0.996 
+
+* gbm model(gradient boosting with trees) : 0.981
+
+This is consistent with the Accuracy intervals generated by train() during the model generation process with bootstrapping.
+
+####6) Final model
+The  random forest (rf) model was chosen as the final model as it had the highest predicted out of sample Accuracy (0.996) among the three models. 
+
+####7) Additional investigations
+There were two additional investigations done
+
+a) Can a better random forest model be generated using k-fold instead of bootstrap?
+
+To dtermine if the bootstrap process helped a separate cross-validation method k-fold with k=10 was done. There was no improvement in the Accuracy. The commands for the k-fold cv method are
+```{r}
+## train_control <- trainControl(method="cv", number=10)
+## modelrfk <- train(classe ~ ., data=training, trControl=train_control, method="rf")
+```
+
+b) Can we generate the same accuracy with a smaller set of predictors?
+
+The importance of the predictors for the rf model are
+```{r}
+varImp(modelrf)
+```
+
+A model using the following 8 predictors was better than the gbm model but slightly less accurate than the orginal rf model with 71 predictors. 
+```{r}
+## modelrflim <- train(classe ~ roll_belt + pitch_forearm + yaw_belt + magnet_dumbbell_z + pitch_belt + roll_forearm + magnet_dumbbell_y + magnet_dumbbell_x, data=training, method="rf")
+
+modelrflim <- readRDS("rfModellim_1234.rds")
+
+## Predict on the validation set
+result <- confusionMatrix(predict(modelrflim, newdata=validation), validation$classe)
+result$table
+paste("Out of sample (generalization) Accuracy", round(result$overall[1], 3), sep = " = ")
+```
+
+####8) Testing the prediction model (rf model) against the 20 different test cases
+
+This was done using the following commands: 
+
+###### Read the test data
+tData <- read.csv(file=".\\data\\pml-testing.csv",header=TRUE, stringsAsFactors =FALSE)
+
+###### Predict on the test set
+predict(modelrf, newdata=tData) 
+
+
+The results were submitted using the submission interface and matched the expected answers for all twenty cases.
+
+
+
+
+
